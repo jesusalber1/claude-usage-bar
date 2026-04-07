@@ -67,8 +67,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = hostingView
 
         usageManager.fetchUsage()
-        Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        scheduleBackgroundRefresh()
+    }
+
+    func scheduleBackgroundRefresh() {
+        let interval = 900 + Double.random(in: 0...300) // 15 min + rand 0-5 min
+        Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             self?.usageManager.fetchUsage()
+            self?.updateStatusIcon()
+            self?.scheduleBackgroundRefresh()
         }
     }
 
@@ -383,7 +390,20 @@ struct UsageView: View {
             }
 
             // Collapsible settings
-            DisclosureGroup(isExpanded: $showSettings) {
+            Button(action: { withAnimation { showSettings.toggle() } }) {
+                HStack {
+                    Image(systemName: showSettings ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                    Text("Settings")
+                        .font(.caption)
+                    Spacer()
+                }
+                .foregroundColor(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showSettings {
                 VStack(alignment: .leading, spacing: 10) {
                     // Cookie input
                     VStack(alignment: .leading, spacing: 4) {
@@ -442,10 +462,6 @@ struct UsageView: View {
                     .foregroundColor(.red)
                 }
                 .padding(.top, 6)
-            } label: {
-                Text("Settings")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
         }
         .padding(16)

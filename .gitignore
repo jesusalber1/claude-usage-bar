@@ -1,0 +1,6 @@
+*.app
+*.icns
+*.iconset
+icon_1024.png
+.DS_Store
+.worktree/

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 // MARK: - Entry Point
 
@@ -66,8 +67,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 400))
         panel.contentView = hostingView
 
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                NSLog("Notification auth error: \(error.localizedDescription)")
+            } else {
+                NSLog("Notification auth granted: \(granted)")
+            }
+        }
+
         usageManager.fetchUsage()
         scheduleBackgroundRefresh()
+
+        DistributedNotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appearanceChanged),
+            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil
+        )
+    }
+
+    @objc func appearanceChanged() {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateStatusIcon()
+        }
     }
 
     func scheduleBackgroundRefresh() {
@@ -87,13 +109,61 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         else if pct >= 70 { color = .systemOrange }
         else { color = .systemGreen }
 
-        let text = "C \(pct)%"
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: color
-        ]
-        button.attributedTitle = NSAttributedString(string: text, attributes: attributes)
-        button.image = nil
+        let isDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let foreground: NSColor = isDark ? .white : .black
+
+        let emoji = "🤖"
+        let pctText = "\(pct)%"
+        let emojiFont = NSFont.systemFont(ofSize: 13)
+        let textFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+
+        let emojiSize = (emoji as NSString).size(withAttributes: [.font: emojiFont])
+        let textSize = (pctText as NSString).size(withAttributes: [.font: textFont])
+
+        let gap: CGFloat = 4
+        let barHeight: CGFloat = 2
+        let barTopGap: CGFloat = 3
+        let contentWidth = emojiSize.width + gap + textSize.width
+        let contentHeight = max(emojiSize.height, textSize.height)
+        let height: CGFloat = contentHeight + barTopGap + barHeight
+        let width = contentWidth
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+
+        let contentBottom = barHeight + barTopGap
+        let emojiY = contentBottom + (contentHeight - emojiSize.height) / 2
+        (emoji as NSString).draw(
+            at: NSPoint(x: 0, y: emojiY),
+            withAttributes: [.font: emojiFont]
+        )
+
+        let textY = contentBottom + (contentHeight - textSize.height) / 2
+        (pctText as NSString).draw(
+            at: NSPoint(x: emojiSize.width + gap, y: textY),
+            withAttributes: [.font: textFont, .foregroundColor: foreground]
+        )
+
+        let trackRect = NSRect(x: 0, y: 0, width: width, height: barHeight)
+        let track = NSBezierPath(roundedRect: trackRect, xRadius: barHeight / 2, yRadius: barHeight / 2)
+        foreground.withAlphaComponent(0.2).setFill()
+        track.fill()
+
+        let fillWidth = width * CGFloat(min(max(Double(pct) / 100.0, 0), 1))
+        if fillWidth > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            track.addClip()
+            color.setFill()
+            NSBezierPath(rect: NSRect(x: 0, y: 0, width: fillWidth, height: barHeight)).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        image.unlockFocus()
+        image.isTemplate = false
+
+        button.image = image
+        button.attributedTitle = NSAttributedString(string: "")
+        button.imagePosition = .imageOnly
     }
 
     @objc func togglePanel() {
@@ -336,11 +406,32 @@ class UsageManager: ObservableObject {
     }
 
     func sendNotification(title: String, body: String) {
-        let notification = NSUserNotification()
-        notification.title = title
-        notification.informativeText = body
-        notification.soundName = NSUserNotificationDefaultSoundName
-        NSUserNotificationCenter.default.deliver(notification)
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil
+        )
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            if settings.authorizationStatus == .notDetermined {
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    if granted { center.add(request) }
+                }
+            } else if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+                center.add(request) { error in
+                    if let error = error {
+                        NSLog("Notification deliver error: \(error.localizedDescription)")
+                    }
+                }
+            } else {
+                NSLog("Notifications not authorized: \(settings.authorizationStatus.rawValue)")
+            }
+        }
     }
 }
 

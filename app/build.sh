@@ -35,6 +35,9 @@ swiftc \
     -parse-as-library \
     "$SCRIPT_DIR/$APP_NAME.swift"
 
+# Ad-hoc codesign (required for UserNotifications, LaunchServices registration, etc.)
+codesign --force --deep --sign - "$APP_BUNDLE"
+
 echo "Build complete: $APP_BUNDLE"
 echo ""
 echo "Run with: open $APP_BUNDLE"

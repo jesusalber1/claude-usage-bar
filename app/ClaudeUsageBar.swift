@@ -43,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let usageManager = UsageManager()
     var eventMonitor: Any?
     var refreshTimer: Timer?
+    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -51,6 +52,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             updateStatusIcon()
             button.action = #selector(togglePanel)
             button.target = self
+            appearanceObservation = button.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.updateStatusIcon() }
+            }
         }
 
         let hostingView = NSHostingView(
@@ -76,6 +80,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        usageManager.onDataUpdated = { [weak self] in
+            self?.updateStatusIcon()
+        }
         usageManager.fetchUsage()
         scheduleBackgroundRefresh()
 
@@ -126,7 +133,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         else if pct >= 70 { color = .systemOrange }
         else { color = .systemGreen }
 
-        let isDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let appearance = button.window != nil ? button.effectiveAppearance : NSApp.effectiveAppearance
+        let matchedName = appearance.bestMatch(from: [
+            .aqua, .darkAqua,
+            .vibrantLight, .vibrantDark,
+            .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+            .accessibilityHighContrastVibrantLight, .accessibilityHighContrastVibrantDark
+        ])
+        let isDark = matchedName == .darkAqua
+            || matchedName == .vibrantDark
+            || matchedName == .accessibilityHighContrastDarkAqua
+            || matchedName == .accessibilityHighContrastVibrantDark
         let foreground: NSColor = isDark ? .white : .black
 
         let emoji = "🤖"
@@ -256,6 +273,7 @@ class UsageManager: ObservableObject {
     }
 
     private var firedThresholds: Set<Int> = []
+    var onDataUpdated: (() -> Void)?
 
     init() {
         self.cookie = UserDefaults.standard.string(forKey: "claude_session_cookie") ?? ""
@@ -346,6 +364,7 @@ class UsageManager: ObservableObject {
 
                 self.parseUsage(json)
                 self.updateTimestamp()
+                self.onDataUpdated?()
             }
         }.resume()
     }

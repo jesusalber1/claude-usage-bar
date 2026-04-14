@@ -42,6 +42,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel!
     let usageManager = UsageManager()
     var eventMonitor: Any?
+    var refreshTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -84,6 +85,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
             object: nil
         )
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc func systemDidWake() {
+        usageManager.fetchUsage()
+        updateStatusIcon()
+        refreshTimer?.invalidate()
+        scheduleBackgroundRefresh()
     }
 
     @objc func appearanceChanged() {
@@ -94,11 +109,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func scheduleBackgroundRefresh() {
         let interval = 900 + Double.random(in: 0...300) // 15 min + rand 0-5 min
-        Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             self?.usageManager.fetchUsage()
             self?.updateStatusIcon()
             self?.scheduleBackgroundRefresh()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
     }
 
     func updateStatusIcon() {

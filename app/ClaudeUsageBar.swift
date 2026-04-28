@@ -141,10 +141,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateStatusIcon() {
         guard let button = statusItem.button else { return }
         let pct = Int(usageManager.sessionPercent)
-        let color: NSColor
-        if pct >= 90 { color = .systemRed }
-        else if pct >= 70 { color = .systemOrange }
-        else { color = .systemGreen }
 
         let appearance = button.window != nil ? button.effectiveAppearance : NSApp.effectiveAppearance
         let matchedName = appearance.bestMatch(from: [
@@ -225,7 +221,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let timeFraction = computeTimeFraction(usageManager.sessionResetDate)
         drawRow(rowHeight + rowGap, stopwatchImage, timeFraction, foreground.withAlphaComponent(0.55), timeText, timeSize)
-        drawRow(0, usageImage, Double(pct) / 100.0, color, pctText, pctSize)
+        drawRow(0, usageImage, Double(pct) / 100.0, foreground.withAlphaComponent(0.55), pctText, pctSize)
 
         image.unlockFocus()
         image.isTemplate = false

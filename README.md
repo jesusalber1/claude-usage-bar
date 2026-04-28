@@ -9,11 +9,13 @@ A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour se
 
 ## Features
 
-- 🤖 Robot icon with current session percentage and a color progress bar (green / orange / red)
-- Adapts to light, dark, and dynamic menu bar appearances
-- Click for a popover with all three usage windows and reset times
-- Background refresh every ~15 min (with jitter), plus refresh on wake and on open
+- Two compact bars in the menu bar: time left in the 5-hour session and current session usage %, each with its own icon and label
+- Adapts to light and dark menu bar appearances automatically
+- Click for a popover with all usage windows (5-hour session, 7-day weekly, 7-day Sonnet weekly) and exact reset times
+- Popover bars turn orange at 70% and red at 90%
+- Background refresh every ~15 min (with jitter), plus refresh on wake and when the popover is opened
 - Optional notifications at 25% / 50% / 75% / 90% session usage
+- One-click **Import from Chrome** to grab the session cookie automatically — no DevTools needed
 - Open at login
 
 ## Install
@@ -31,6 +33,12 @@ open /Applications/ClaudeUsageBar.app
 ## Setup
 
 The app needs your Claude.ai session cookie to read your usage from the same private endpoint the website uses.
+
+### Option A — Import from Chrome (recommended)
+
+If you're signed into [claude.ai](https://claude.ai) in Google Chrome, click the menu bar icon → Settings → **Import from Chrome**. The first time, macOS will prompt to allow access to the `Chrome Safe Storage` keychain item — click *Always Allow*.
+
+### Option B — Paste manually
 
 1. Open [claude.ai](https://claude.ai) in your browser, signed in.
 2. Open DevTools → Application/Storage → Cookies → `https://claude.ai`.

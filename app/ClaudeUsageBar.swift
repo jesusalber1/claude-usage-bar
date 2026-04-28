@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 import UserNotifications
 import ServiceManagement
+import SQLite3
+import CommonCrypto
 
 // MARK: - Entry Point
 
@@ -558,12 +560,223 @@ class UsageManager: ObservableObject {
     }
 }
 
+// MARK: - Chrome Cookie Importer
+
+enum ChromeImportError: LocalizedError {
+    case databaseNotFound
+    case keychainDenied
+    case databaseOpenFailed
+    case decryptFailed
+    case noClaudeCookies
+
+    var errorDescription: String? {
+        switch self {
+        case .databaseNotFound: return "Chrome cookie database not found. Is Chrome installed?"
+        case .keychainDenied: return "Couldn't read Chrome's keychain key. Allow access when prompted."
+        case .databaseOpenFailed: return "Couldn't open Chrome's cookie database."
+        case .decryptFailed: return "Failed to decrypt Chrome cookies."
+        case .noClaudeCookies: return "No claude.ai cookies in Chrome. Sign in to claude.ai first."
+        }
+    }
+}
+
+enum ChromeCookieImporter {
+    private struct CookieRow {
+        let name: String
+        let plainValue: String
+        let encryptedValue: Data
+    }
+
+    static func importClaudeCookie() throws -> String {
+        let dbPath = try locateDatabase()
+        let workingPath = try copyToTemp(dbPath: dbPath)
+        defer { try? FileManager.default.removeItem(atPath: workingPath) }
+
+        let rows = try queryCookies(dbPath: workingPath)
+        guard !rows.isEmpty else { throw ChromeImportError.noClaudeCookies }
+
+        let key = try deriveKey(password: try fetchKeychainPassword())
+
+        var sessionKey: String?
+        var lastActiveOrg: String?
+        for row in rows {
+            let value: String
+            if !row.encryptedValue.isEmpty {
+                guard let decrypted = try? decrypt(data: row.encryptedValue, key: key) else { continue }
+                value = decrypted
+            } else {
+                value = row.plainValue
+            }
+            switch row.name {
+            case "sessionKey": sessionKey = value
+            case "lastActiveOrg": lastActiveOrg = value
+            default: break
+            }
+        }
+
+        guard let sk = sessionKey else { throw ChromeImportError.noClaudeCookies }
+        if let org = lastActiveOrg {
+            return "sessionKey=\(sk); lastActiveOrg=\(org)"
+        }
+        return "sessionKey=\(sk)"
+    }
+
+    private static func locateDatabase() throws -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let candidates = [
+            "\(home)/Library/Application Support/Google/Chrome/Default/Network/Cookies",
+            "\(home)/Library/Application Support/Google/Chrome/Default/Cookies",
+        ]
+        guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            throw ChromeImportError.databaseNotFound
+        }
+        return path
+    }
+
+    private static func copyToTemp(dbPath: String) throws -> String {
+        let tmpDir = NSTemporaryDirectory()
+        let dst = (tmpDir as NSString).appendingPathComponent("claude_cookies_\(UUID().uuidString).db")
+        try? FileManager.default.removeItem(atPath: dst)
+        try FileManager.default.copyItem(atPath: dbPath, toPath: dst)
+        for suffix in ["-wal", "-shm"] {
+            let src = dbPath + suffix
+            if FileManager.default.fileExists(atPath: src) {
+                try? FileManager.default.copyItem(atPath: src, toPath: dst + suffix)
+            }
+        }
+        return dst
+    }
+
+    private static func queryCookies(dbPath: String) throws -> [CookieRow] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            if db != nil { sqlite3_close(db) }
+            throw ChromeImportError.databaseOpenFailed
+        }
+        defer { sqlite3_close(db) }
+
+        var stmt: OpaquePointer?
+        let sql = "SELECT name, value, encrypted_value FROM cookies WHERE host_key LIKE '%claude.ai'"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw ChromeImportError.databaseOpenFailed
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var rows: [CookieRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let nameC = sqlite3_column_text(stmt, 0) else { continue }
+            let name = String(cString: nameC)
+            let plain = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            let blobLen = Int(sqlite3_column_bytes(stmt, 2))
+            let blobData: Data
+            if let blob = sqlite3_column_blob(stmt, 2), blobLen > 0 {
+                blobData = Data(bytes: blob, count: blobLen)
+            } else {
+                blobData = Data()
+            }
+            rows.append(CookieRow(name: name, plainValue: plain, encryptedValue: blobData))
+        }
+        return rows
+    }
+
+    private static func fetchKeychainPassword() throws -> String {
+        let process = Process()
+        process.launchPath = "/usr/bin/security"
+        process.arguments = ["find-generic-password", "-wa", "Chrome"]
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+        } catch {
+            throw ChromeImportError.keychainDenied
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw ChromeImportError.keychainDenied
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty else { throw ChromeImportError.keychainDenied }
+        return raw
+    }
+
+    private static func deriveKey(password: String) throws -> Data {
+        let saltStr = "saltysalt"
+        let iterations: UInt32 = 1003
+        let keyLength = 16
+        guard let passwordData = password.data(using: .utf8),
+              let saltData = saltStr.data(using: .utf8) else {
+            throw ChromeImportError.decryptFailed
+        }
+        var derived = Data(count: keyLength)
+        let status = derived.withUnsafeMutableBytes { derivedBytes -> Int32 in
+            passwordData.withUnsafeBytes { pwBytes -> Int32 in
+                saltData.withUnsafeBytes { saltBytes -> Int32 in
+                    CCKeyDerivationPBKDF(
+                        CCPBKDFAlgorithm(kCCPBKDF2),
+                        pwBytes.bindMemory(to: Int8.self).baseAddress, passwordData.count,
+                        saltBytes.bindMemory(to: UInt8.self).baseAddress, saltData.count,
+                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
+                        iterations,
+                        derivedBytes.bindMemory(to: UInt8.self).baseAddress, keyLength
+                    )
+                }
+            }
+        }
+        guard status == kCCSuccess else { throw ChromeImportError.decryptFailed }
+        return derived
+    }
+
+    private static func decrypt(data: Data, key: Data) throws -> String {
+        guard data.count > 3 else { throw ChromeImportError.decryptFailed }
+        let prefix = data.subdata(in: 0..<3)
+        guard String(data: prefix, encoding: .utf8) == "v10" else {
+            throw ChromeImportError.decryptFailed
+        }
+        let ciphertext = data.subdata(in: 3..<data.count)
+        let iv = Data(repeating: 0x20, count: 16)
+
+        var output = Data(count: ciphertext.count + kCCBlockSizeAES128)
+        let outputCapacity = output.count
+        var outLen: size_t = 0
+        let status = output.withUnsafeMutableBytes { outBytes -> CCCryptorStatus in
+            ciphertext.withUnsafeBytes { ctBytes -> CCCryptorStatus in
+                iv.withUnsafeBytes { ivBytes -> CCCryptorStatus in
+                    key.withUnsafeBytes { keyBytes -> CCCryptorStatus in
+                        CCCrypt(
+                            CCOperation(kCCDecrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyBytes.bindMemory(to: UInt8.self).baseAddress, key.count,
+                            ivBytes.bindMemory(to: UInt8.self).baseAddress,
+                            ctBytes.bindMemory(to: UInt8.self).baseAddress, ciphertext.count,
+                            outBytes.bindMemory(to: UInt8.self).baseAddress, outputCapacity,
+                            &outLen
+                        )
+                    }
+                }
+            }
+        }
+        guard status == kCCSuccess else { throw ChromeImportError.decryptFailed }
+        output.count = outLen
+        guard let str = String(data: output, encoding: .utf8) else {
+            throw ChromeImportError.decryptFailed
+        }
+        return str
+    }
+}
+
 // MARK: - Usage View
 
 struct UsageView: View {
     @ObservedObject var manager: UsageManager
     var onUpdate: () -> Void
     @State private var showSettings = false
+    @State private var importStatus: String?
+    @State private var importStatusIsError = false
+    @State private var isImporting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -633,6 +846,24 @@ struct UsageView: View {
                                 onUpdate()
                             }
                             .font(.caption)
+                        }
+                        HStack(spacing: 8) {
+                            Button(action: importFromChrome) {
+                                HStack(spacing: 4) {
+                                    if isImporting {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Text(isImporting ? "Importing..." : "Import from Chrome")
+                                }
+                            }
+                            .font(.caption)
+                            .disabled(isImporting)
+                            if let status = importStatus {
+                                Text(status)
+                                    .font(.caption2)
+                                    .foregroundColor(importStatusIsError ? .red : .secondary)
+                                    .lineLimit(2)
+                            }
                         }
                     }
 
@@ -714,5 +945,32 @@ struct UsageView: View {
         if percent >= 90 { return .red }
         if percent >= 70 { return .orange }
         return .primary.opacity(0.7)
+    }
+
+    private func importFromChrome() {
+        isImporting = true
+        importStatus = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result: Result<String, Error>
+            do {
+                result = .success(try ChromeCookieImporter.importClaudeCookie())
+            } catch {
+                result = .failure(error)
+            }
+            DispatchQueue.main.async {
+                isImporting = false
+                switch result {
+                case .success(let cookie):
+                    manager.cookie = cookie
+                    importStatusIsError = false
+                    importStatus = "Imported from Chrome"
+                    manager.fetchUsage()
+                    onUpdate()
+                case .failure(let error):
+                    importStatusIsError = true
+                    importStatus = error.localizedDescription
+                }
+            }
+        }
     }
 }

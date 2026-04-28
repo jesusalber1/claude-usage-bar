@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UserNotifications
+import ServiceManagement
 
 // MARK: - Entry Point
 
@@ -321,7 +322,27 @@ class UsageManager: ObservableObject {
         didSet { UserDefaults.standard.set(cookie, forKey: "claude_session_cookie") }
     }
     @Published var openAtLogin: Bool {
-        didSet { UserDefaults.standard.set(openAtLogin, forKey: "open_at_login") }
+        didSet {
+            UserDefaults.standard.set(openAtLogin, forKey: "open_at_login")
+            applyOpenAtLogin(openAtLogin)
+        }
+    }
+
+    private func applyOpenAtLogin(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        do {
+            if enabled {
+                if service.status != .enabled {
+                    try service.register()
+                }
+            } else {
+                if service.status == .enabled {
+                    try service.unregister()
+                }
+            }
+        } catch {
+            NSLog("Open-at-login update failed: \(error.localizedDescription)")
+        }
     }
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notifications_enabled") }
@@ -332,8 +353,13 @@ class UsageManager: ObservableObject {
 
     init() {
         self.cookie = UserDefaults.standard.string(forKey: "claude_session_cookie") ?? ""
-        self.openAtLogin = UserDefaults.standard.bool(forKey: "open_at_login")
+        let savedOpenAtLogin = UserDefaults.standard.bool(forKey: "open_at_login")
+        let systemEnabled = SMAppService.mainApp.status == .enabled
+        self.openAtLogin = savedOpenAtLogin || systemEnabled
         self.notificationsEnabled = UserDefaults.standard.bool(forKey: "notifications_enabled")
+        if savedOpenAtLogin && !systemEnabled {
+            applyOpenAtLogin(true)
+        }
     }
 
     func fetchUsage() {

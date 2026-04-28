@@ -2,7 +2,7 @@
 
 A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour session, weekly, and Sonnet weekly limits.
 
-![screenshot](app/icon_1024.png)
+![icon](app/icon_1024.png)
 
 ## Features
 
@@ -13,18 +13,14 @@ A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour se
 - Optional notifications at 25% / 50% / 75% / 90% session usage
 - Open at login
 
-## Build
+## Install
 
-Requires macOS with the Swift toolchain (Xcode command line tools).
+Requires macOS with the Swift toolchain (Xcode command line tools). Install them once with `xcode-select --install` if you don't have them.
 
 ```sh
+git clone git@github.com:jesusalber1/claude-usage-bar.git
+cd claude-usage-bar
 bash app/build.sh
-open app/ClaudeUsageBar.app
-```
-
-To install:
-
-```sh
 cp -R app/ClaudeUsageBar.app /Applications/
 open /Applications/ClaudeUsageBar.app
 ```
@@ -39,6 +35,10 @@ The app needs your Claude.ai session cookie to read your usage from the same pri
 4. Click the menu bar icon → Settings → paste the cookie.
 
 Your cookie is stored locally in `UserDefaults` and is only sent to `claude.ai`.
+
+## Open at Login
+
+To have Claude Usage Bar launch automatically when you sign in, click the menu bar icon → Settings and toggle **Open at Login**. This uses macOS's `SMAppService`, so you can also manage it from System Settings → General → Login Items.
 
 ## Privacy
 

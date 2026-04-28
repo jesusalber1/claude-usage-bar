@@ -2,7 +2,8 @@
 
 A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour session, weekly, and Sonnet weekly limits.
 
-![menu bar](screenshots/menu-bar.png)
+![menu bar — light](screenshots/menu-bar-light.png)
+![menu bar — dark](screenshots/menu-bar-dark.png)
 
 ![popover](screenshots/popover.png)
 

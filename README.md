@@ -6,6 +6,7 @@ A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour se
 ![menu bar — dark](screenshots/menu-bar-dark.png)
 
 ![popover](screenshots/popover.png)
+![popover — full view](screenshots/popover-full.png)
 
 ## Features
 

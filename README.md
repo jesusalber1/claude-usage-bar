@@ -24,10 +24,10 @@ Requires macOS with the Swift toolchain (Xcode command line tools). Install them
 ```sh
 git clone git@github.com:jesusalber1/claude-usage-bar.git
 cd claude-usage-bar
-bash app/build.sh
-cp -R app/ClaudeUsageBar.app /Applications/
-open /Applications/ClaudeUsageBar.app
+./install.sh
 ```
+
+`install.sh` builds the app, copies it to `/Applications`, and launches it. Re-run it any time to upgrade.
 
 ## Setup
 

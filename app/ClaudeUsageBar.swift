@@ -46,8 +46,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var refreshTimer: Timer?
     var iconTickTimer: Timer?
     private var appearanceObservation: NSKeyValueObservation?
+    private var backgroundActivity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        backgroundActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.background, .suddenTerminationDisabled],
+            reason: "Periodic Claude usage refresh"
+        )
         installMainMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 

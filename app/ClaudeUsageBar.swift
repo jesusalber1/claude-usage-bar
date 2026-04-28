@@ -43,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let usageManager = UsageManager()
     var eventMonitor: Any?
     var refreshTimer: Timer?
+    var iconTickTimer: Timer?
     private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -85,6 +86,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         usageManager.fetchUsage()
         scheduleBackgroundRefresh()
+        scheduleIconTick()
 
         DistributedNotificationCenter.default.addObserver(
             self,
@@ -106,6 +108,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusIcon()
         refreshTimer?.invalidate()
         scheduleBackgroundRefresh()
+        scheduleIconTick()
     }
 
     @objc func appearanceChanged() {
@@ -123,6 +126,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
+    }
+
+    func scheduleIconTick() {
+        iconTickTimer?.invalidate()
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            self?.updateStatusIcon()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        iconTickTimer = timer
     }
 
     func updateStatusIcon() {
@@ -146,51 +158,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             || matchedName == .accessibilityHighContrastVibrantDark
         let foreground: NSColor = isDark ? .white : .black
 
-        let emoji = "🤖"
         let pctText = "\(pct)%"
-        let emojiFont = NSFont.systemFont(ofSize: 13)
-        let textFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        let timeText = formatTimeLeft(usageManager.sessionResetDate)
+        let textFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
 
-        let emojiSize = (emoji as NSString).size(withAttributes: [.font: emojiFont])
-        let textSize = (pctText as NSString).size(withAttributes: [.font: textFont])
+        let pctSize = (pctText as NSString).size(withAttributes: [.font: textFont])
+        let timeSize = (timeText as NSString).size(withAttributes: [.font: textFont])
+        let textWidth = max(pctSize.width, timeSize.width)
 
-        let gap: CGFloat = 4
-        let barHeight: CGFloat = 2
-        let barTopGap: CGFloat = 3
-        let contentWidth = emojiSize.width + gap + textSize.width
-        let contentHeight = max(emojiSize.height, textSize.height)
-        let height: CGFloat = contentHeight + barTopGap + barHeight
-        let width = contentWidth
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 8, weight: .semibold)
+            .applying(.init(paletteColors: [foreground]))
+        let stopwatchImage = NSImage(systemSymbolName: "stopwatch", accessibilityDescription: nil)?
+            .withSymbolConfiguration(symbolConfig)
+        let usageImage = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(symbolConfig)
+
+        let iconColumnWidth: CGFloat = 11
+        let barHeight: CGFloat = 3
+        let rowHeight: CGFloat = max(11, pctSize.height, timeSize.height)
+        let rowGap: CGFloat = 1
+        let gap: CGFloat = 3
+        let barWidth: CGFloat = 28
+
+        let width = iconColumnWidth + gap + barWidth + gap + textWidth
+        let height = rowHeight * 2 + rowGap
 
         let image = NSImage(size: NSSize(width: width, height: height))
         image.lockFocus()
 
-        let contentBottom = barHeight + barTopGap
-        let emojiY = contentBottom + (contentHeight - emojiSize.height) / 2
-        (emoji as NSString).draw(
-            at: NSPoint(x: 0, y: emojiY),
-            withAttributes: [.font: emojiFont]
-        )
+        let drawRow: (CGFloat, NSImage?, Double, NSColor, String, NSSize) -> Void = { yOffset, icon, fraction, fillColor, text, textSize in
+            if let icon = icon {
+                let iconY = yOffset + (rowHeight - icon.size.height) / 2
+                let iconX = max(0, (iconColumnWidth - icon.size.width) / 2)
+                icon.draw(
+                    at: NSPoint(x: iconX, y: iconY),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1.0
+                )
+            }
 
-        let textY = contentBottom + (contentHeight - textSize.height) / 2
-        (pctText as NSString).draw(
-            at: NSPoint(x: emojiSize.width + gap, y: textY),
-            withAttributes: [.font: textFont, .foregroundColor: foreground]
-        )
+            let barX = iconColumnWidth + gap
+            let barY = yOffset + (rowHeight - barHeight) / 2
+            let trackRect = NSRect(x: barX, y: barY, width: barWidth, height: barHeight)
+            let track = NSBezierPath(roundedRect: trackRect, xRadius: barHeight / 2, yRadius: barHeight / 2)
+            foreground.withAlphaComponent(0.18).setFill()
+            track.fill()
 
-        let trackRect = NSRect(x: 0, y: 0, width: width, height: barHeight)
-        let track = NSBezierPath(roundedRect: trackRect, xRadius: barHeight / 2, yRadius: barHeight / 2)
-        foreground.withAlphaComponent(0.2).setFill()
-        track.fill()
+            let fillW = barWidth * CGFloat(min(max(fraction, 0), 1))
+            if fillW > 0 {
+                NSGraphicsContext.saveGraphicsState()
+                track.addClip()
+                fillColor.setFill()
+                NSBezierPath(rect: NSRect(x: barX, y: barY, width: fillW, height: barHeight)).fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
 
-        let fillWidth = width * CGFloat(min(max(Double(pct) / 100.0, 0), 1))
-        if fillWidth > 0 {
-            NSGraphicsContext.saveGraphicsState()
-            track.addClip()
-            color.setFill()
-            NSBezierPath(rect: NSRect(x: 0, y: 0, width: fillWidth, height: barHeight)).fill()
-            NSGraphicsContext.restoreGraphicsState()
+            let textX = barX + barWidth + gap
+            let textY = yOffset + (rowHeight - textSize.height) / 2
+            (text as NSString).draw(
+                at: NSPoint(x: textX, y: textY),
+                withAttributes: [.font: textFont, .foregroundColor: foreground]
+            )
         }
+
+        let timeFraction = computeTimeFraction(usageManager.sessionResetDate)
+        drawRow(rowHeight + rowGap, stopwatchImage, timeFraction, foreground.withAlphaComponent(0.55), timeText, timeSize)
+        drawRow(0, usageImage, Double(pct) / 100.0, color, pctText, pctSize)
 
         image.unlockFocus()
         image.isTemplate = false
@@ -198,6 +232,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = image
         button.attributedTitle = NSAttributedString(string: "")
         button.imagePosition = .imageOnly
+    }
+
+    private func computeTimeFraction(_ date: Date?) -> Double {
+        guard let date = date else { return 0 }
+        let total: TimeInterval = 5 * 3600
+        let remaining = date.timeIntervalSinceNow
+        let elapsed = total - remaining
+        return max(0, min(1, elapsed / total))
+    }
+
+    private func formatTimeLeft(_ date: Date?) -> String {
+        guard let date = date else { return "—" }
+        let interval = date.timeIntervalSinceNow
+        if interval <= 0 { return "0m" }
+        let totalMinutes = Int(interval / 60)
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        if totalMinutes > 0 { return "\(totalMinutes)m" }
+        return "<1m"
     }
 
     @objc func togglePanel() {
@@ -253,6 +307,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 class UsageManager: ObservableObject {
     @Published var sessionPercent: Double = 0
     @Published var sessionResetsAt: String = ""
+    @Published var sessionResetDate: Date?
     @Published var weeklyPercent: Double = 0
     @Published var weeklyResetsAt: String = ""
     @Published var sonnetPercent: Double = 0
@@ -373,6 +428,7 @@ class UsageManager: ObservableObject {
         if let session = json["five_hour"] as? [String: Any] {
             sessionPercent = (session["utilization"] as? Double) ?? 0
             sessionResetsAt = formatResetTime(session["resets_at"] as? String)
+            sessionResetDate = parseISODate(session["resets_at"] as? String)
         }
         if let weekly = json["seven_day"] as? [String: Any] {
             weeklyPercent = (weekly["utilization"] as? Double) ?? 0
@@ -387,6 +443,15 @@ class UsageManager: ObservableObject {
         }
 
         checkNotifications()
+    }
+
+    private func parseISODate(_ iso: String?) -> Date? {
+        guard let iso = iso else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = formatter.date(from: iso) { return d }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: iso)
     }
 
     private func formatResetTime(_ iso: String?) -> String {

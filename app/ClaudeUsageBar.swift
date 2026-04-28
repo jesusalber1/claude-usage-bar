@@ -151,7 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func scheduleBackgroundRefresh() {
-        let interval = 900 + Double.random(in: 0...300) // 15 min + rand 0-5 min
+        let interval = 300 + Double.random(in: 0...60) // 5 min + rand 0-1 min
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             self?.usageManager.fetchUsage()
             self?.updateStatusIcon()

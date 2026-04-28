@@ -14,7 +14,7 @@ A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour se
 - Adapts to light and dark menu bar appearances automatically
 - Click for a popover with all usage windows (5-hour session, 7-day weekly, 7-day Sonnet weekly) and exact reset times
 - Popover bars turn orange at 70% and red at 90%
-- Background refresh every ~15 min (with jitter), plus refresh on wake and when the popover is opened
+- Background refresh every ~5 min (with jitter), plus refresh on wake and when the popover is opened
 - Optional notifications at 25% / 50% / 75% / 90% session usage
 - Open at login
 

@@ -2,6 +2,8 @@
 
 A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour session, weekly, and Sonnet weekly limits.
 
+> **Unofficial.** Not affiliated with Anthropic. It reads your usage from a private, undocumented endpoint that powers the claude.ai usage page — Anthropic may change or remove it at any time, which would break this app until it's updated.
+
 ![menu bar — light](screenshots/menu-bar-light.png)
 ![menu bar — dark](screenshots/menu-bar-dark.png)
 

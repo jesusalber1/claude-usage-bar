@@ -126,7 +126,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         )
 
-        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 400))
+        // Start tiny so the hosting view's first fittingSize reflects the
+        // SwiftUI content's natural height, not this initial frame.
+        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 1))
         panel.contentView = hostingView
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in

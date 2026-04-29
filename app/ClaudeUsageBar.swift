@@ -21,6 +21,11 @@ struct Main {
 class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
+    /// When set, resizes pin the panel's top-left here so it grows downward only.
+    /// macOS defaults to pinning the bottom-left, which would drift the top edge
+    /// during SwiftUI height changes (e.g. the Settings disclosure).
+    var topLeftAnchor: NSPoint?
+
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
@@ -35,6 +40,46 @@ class FloatingPanel: NSPanel {
         hasShadow = true
         isMovableByWindowBackground = false
         isReleasedWhenClosed = false
+    }
+
+    /// Snap to whole logical points. Fractional fittingSize values otherwise
+    /// land on different physical pixel rows on Retina between heights, which
+    /// reads as a 1px content jump when toggling Settings.
+    private func pinned(_ frame: NSRect) -> NSRect {
+        let height = frame.size.height.rounded()
+        let width = frame.size.width.rounded()
+        guard let anchor = topLeftAnchor else {
+            return NSRect(x: frame.origin.x.rounded(), y: frame.origin.y.rounded(),
+                          width: width, height: height)
+        }
+        return NSRect(x: anchor.x.rounded(),
+                      y: (anchor.y - height).rounded(),
+                      width: width,
+                      height: height)
+    }
+
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        super.setFrame(pinned(frameRect), display: flag)
+    }
+
+    override func setFrame(_ frameRect: NSRect, display displayFlag: Bool, animate animateFlag: Bool) {
+        super.setFrame(pinned(frameRect), display: displayFlag, animate: animateFlag)
+    }
+
+    override func setContentSize(_ size: NSSize) {
+        super.setContentSize(NSSize(width: size.width.rounded(), height: size.height.rounded()))
+        if let anchor = topLeftAnchor {
+            setFrameTopLeftPoint(NSPoint(x: anchor.x.rounded(), y: anchor.y.rounded()))
+        }
+    }
+
+    override func setFrameOrigin(_ point: NSPoint) {
+        guard let anchor = topLeftAnchor else {
+            super.setFrameOrigin(NSPoint(x: point.x.rounded(), y: point.y.rounded()))
+            return
+        }
+        super.setFrameOrigin(NSPoint(x: anchor.x.rounded(),
+                                     y: (anchor.y - frame.size.height).rounded()))
     }
 }
 
@@ -75,6 +120,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
             )
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Top-anchor the SwiftUI content. Otherwise sub-point leftover
+            // space is split top + bottom, and the split lands on different
+            // physical pixels between collapsed/expanded heights.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         )
 
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 400))
@@ -301,7 +350,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let buttonRect = button.convert(button.bounds, to: nil)
         let screenRect = buttonWindow.convertToScreen(buttonRect)
 
-        // Fit content
+        // Disable the top-left anchor for the initial placement, then re-enable
+        // so subsequent resizes (Settings disclosure) grow downward only.
+        panel.topLeftAnchor = nil
+
         if let hostingView = panel.contentView as? NSHostingView<AnyView> {
             let fitting = hostingView.fittingSize
             panel.setContentSize(NSSize(width: 340, height: fitting.height))
@@ -313,6 +365,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let y = screenRect.minY - panelHeight - 4
 
         panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
+        panel.topLeftAnchor = NSPoint(x: x, y: y + panelHeight)
+
         panel.orderFrontRegardless()
         panel.makeKey()
 
@@ -650,10 +704,11 @@ struct UsageView: View {
             }
 
             // Collapsible settings
-            Button(action: { withAnimation { showSettings.toggle() } }) {
+            Button(action: { showSettings.toggle() }) {
                 HStack {
                     Image(systemName: showSettings ? "chevron.down" : "chevron.right")
                         .font(.caption2)
+                        .frame(width: 10, height: 10, alignment: .center)
                     Text("Settings")
                         .font(.caption)
                     Spacer()

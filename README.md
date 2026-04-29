@@ -22,6 +22,17 @@ A tiny macOS menu bar app that shows your Claude.ai usage at a glance: 5-hour se
 
 ## Install
 
+### Homebrew (recommended)
+
+```sh
+brew tap jesusalber1/tap
+brew install --cask claude-usage-bar
+```
+
+Then launch **Claude Usage Bar** from Spotlight or `/Applications`.
+
+### From source
+
 Requires macOS with the Swift toolchain (Xcode command line tools). Install them once with `xcode-select --install` if you don't have them.
 
 ```sh

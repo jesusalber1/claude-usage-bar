@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build app
+        run: bash app/build.sh
+
+      - name: Zip app
+        run: |
+          cd app
+          ditto -c -k --keepParent ClaudeUsageBar.app ../ClaudeUsageBar.zip
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(shasum -a 256 ClaudeUsageBar.zip | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SHA256: $SHA"
+
+      - name: Write release notes
+        run: |
+          cat > NOTES.md <<EOF
+          ## ClaudeUsageBar ${{ steps.version.outputs.tag }}
+
+          \`ClaudeUsageBar.zip\` SHA256: \`${{ steps.sha.outputs.sha256 }}\`
+
+          ### Homebrew tap install
+          \`\`\`sh
+          brew tap jesusalber1/tap
+          brew install --cask claude-usage-bar
+          \`\`\`
+
+          Update the \`Casks/claude-usage-bar.rb\` in your tap with:
+          - \`version "${{ steps.version.outputs.version }}"\`
+          - \`sha256 "${{ steps.sha.outputs.sha256 }}"\`
+          EOF
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: NOTES.md
+          files: ClaudeUsageBar.zip
